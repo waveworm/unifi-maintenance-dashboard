@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UniFi Maintenance Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1>🎯 UniFi Maintenance Dashboard</h1>
+                <nav style="display: flex; gap: 15px;">
+                    <a href="/" style="color: var(--text-primary); text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.12); border-radius: 6px; font-weight: 600;">🏠 Dashboard</a>
+                    <a href="/schedules" style="color: var(--text-primary); text-decoration: none; padding: 8px 16px; background: rgba(255,255,255,0.06); border-radius: 6px; font-weight: 600;">📅 Schedules</a>
+                </nav>
+            </div>
+            <div class="header-stats">
+                <div class="stat">
+                    <select id="siteSelector" class="site-selector">
+                        <option value="">Loading sites...</option>
+                    </select>
+                    <div class="stat-label">Site</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="totalDevices">0</div>
+                    <div class="stat-label">Total Devices</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="onlineDevices" style="color: var(--online)">0</div>
+                    <div class="stat-label">Online</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="offlineDevices" style="color: var(--offline)">0</div>
+                    <div class="stat-label">Offline</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="switchCount">0</div>
+                    <div class="stat-label">Switches</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <div id="alerts"></div>
+
+        <div class="filters">
+            <div class="filters-row">
+                <div class="filter-group">
+                    <button class="btn filter-btn active" data-filter="all">All Devices</button>
+                    <button class="btn filter-btn" data-filter="online">Online</button>
+                    <button class="btn filter-btn" data-filter="offline">Offline</button>
+                    <button class="btn filter-btn" data-filter="switches">Switches</button>
+                    <button class="btn filter-btn" data-filter="aps">Access Points</button>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search devices by name, IP, MAC, or model...">
+                </div>
+                <button class="btn btn-primary" id="refreshBtn">🔄 Refresh</button>
+            </div>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading devices...</p>
+        </div>
+
+        <div id="devicesContainer" style="display: none;">
+            <div class="devices-grid" id="devicesGrid"></div>
+        </div>
+    </div>
+
+    <!-- Reboot Modal -->
+    <div id="rebootModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Confirm Reboot</h2>
+                <button class="close-btn">&times;</button>
+            </div>
+            <p>Are you sure you want to reboot <strong id="rebootDeviceName"></strong>?</p>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-top: 10px;">
+                The device will be unavailable for approximately 2-3 minutes during the reboot process.
+            </p>
+            <div class="modal-actions">
+                <button class="btn close-btn">Cancel</button>
+                <button class="btn btn-danger" id="confirmReboot">Reboot Device</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PoE Control Modal -->
+    <div id="poeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>PoE Port Control</h2>
+                <button class="close-btn">&times;</button>
+            </div>
+            <p><strong id="poeDeviceName"></strong></p>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 15px;">
+                Select a port to power cycle. PoE will be turned off for 15 seconds, then turned back on.
+            </p>
+            <div id="portsList" class="port-list"></div>
+            <div class="modal-actions">
+                <button class="btn close-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=7"></script>
+</body>
+</html>

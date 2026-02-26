@@ -1,0 +1,425 @@
+import asyncio
+import logging
+from typing import Dict, List, Optional, Any
+from datetime import datetime
+import httpx
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class UniFiClient:
+    """
+    Async UniFi Controller API client.
+    
+    Handles authentication, device management, and PoE control.
+    Supports self-signed certificates for development.
+    """
+    
+    def __init__(self):
+        self.base_url = settings.unifi_base_url
+        self.username = settings.unifi_username
+        self.password = settings.unifi_password
+        self.site = settings.unifi_site
+        self.verify_ssl = settings.unifi_verify_ssl
+        
+        self._client: Optional[httpx.AsyncClient] = None
+        self._authenticated = False
+        self._cookies: Optional[httpx.Cookies] = None
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close()
+    
+    async def connect(self):
+        """Initialize HTTP client and authenticate."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                verify=self.verify_ssl,
+                timeout=30.0,
+                follow_redirects=True
+            )
+        
+        if not self._authenticated:
+            await self.login()
+    
+    async def close(self):
+        """Close HTTP client connection."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+            self._authenticated = False
+    
+    async def login(self) -> bool:
+        """
+        Authenticate with UniFi controller.
+        
+        Returns:
+            bool: True if authentication successful
+        """
+        try:
+            logger.info(f"Authenticating to UniFi controller at {self.base_url}")
+            
+            login_url = f"{self.base_url}/api/login"
+            payload = {
+                "username": self.username,
+                "password": self.password,
+                "remember": True
+            }
+            
+            response = await self._client.post(login_url, json=payload)
+            response.raise_for_status()
+            
+            self._cookies = response.cookies
+            self._authenticated = True
+            
+            logger.info("✅ Successfully authenticated to UniFi controller")
+            return True
+            
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Authentication failed: {e.response.status_code} - {e.response.text}")
+            raise Exception(f"UniFi authentication failed: {e.response.status_code}")
+        except Exception as e:
+            logger.error(f"Connection error during authentication: {e}")
+            raise Exception(f"Failed to connect to UniFi controller: {e}")
+    
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Make authenticated API request.
+        
+        Args:
+            method: HTTP method (GET, POST, PUT, DELETE)
+            endpoint: API endpoint path
+            **kwargs: Additional arguments for httpx request
+        
+        Returns:
+            Dict containing API response data
+        """
+        if not self._authenticated:
+            await self.login()
+        
+        url = f"{self.base_url}{endpoint}"
+        
+        try:
+            response = await self._client.request(
+                method,
+                url,
+                cookies=self._cookies,
+                **kwargs
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            return data
+            
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                logger.warning("Session expired, re-authenticating...")
+                self._authenticated = False
+                await self.login()
+                return await self._request(method, endpoint, **kwargs)
+            
+            logger.error(f"API request failed: {method} {endpoint} - {e.response.status_code}")
+            raise
+        except Exception as e:
+            logger.error(f"Request error: {method} {endpoint} - {e}")
+            raise
+    
+    async def get_sites(self) -> List[Dict[str, Any]]:
+        """
+        Get list of all sites.
+        
+        data = await self._request("GET", "/api/self/sites")
+        return data.get("data", [])
+    
+    async def get_devices(self, site: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all devices from the specified site (or configured default site)."""
+        site = site or self.site
+        endpoint = f"/api/s/{site}/stat/device"
+        
+        data = await self._request("GET", endpoint)
+        devices = data.get("data", [])
+        
+        logger.info(f"Retrieved {len(devices)} devices from site '{site}'")
+        return devices
+    
+    async def get_device_by_id(self, device_id: str, site: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """
+        Get specific device by ID.
+        
+        Args:
+            device_id: Device ID (_id field)
+            site: Site name
+        
+        Returns:
+            Device dictionary or None if not found
+        """
+        devices = await self.get_devices(site)
+        for device in devices:
+            if device.get("_id") == device_id or device.get("mac") == device_id:
+                return device
+        return None
+    
+    async def reboot_device(self, device_id: str, site: Optional[str] = None) -> bool:
+        """
+        Reboot a device.
+        
+        Args:
+            device_id: Device ID or MAC address
+            site: Site name
+        
+        Returns:
+            Dict containing API response data
+        """
+        await self.connect()
+        
+        target_site = site or self.site
+        url = f"{self.base_url}/api/s/{target_site}/cmd/devmgr"
+        payload = {
+            "cmd": "restart",
+            "mac": device_id
+        }
+        
+        response = await self._client.post(url, json=payload, cookies=self._cookies)
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to reboot device: {response.status_code} - {response.text}")
+            raise Exception(f"Failed to reboot device: {response.status_code}")
+        
+        logger.info(f"Reboot command sent to device {device_id}")
+        return response.json()
+    
+    async def set_port_enabled(self, device_id: str, port_idx: int, enabled: bool, site: Optional[str] = None) -> Dict[str, Any]:
+        port_idx: int,
+        mode: str,
+        site: Optional[str] = None
+    ) -> bool:
+        """
+        Set PoE mode for a switch port.
+        
+        Args:
+            device_id: Switch device ID or MAC
+            port_idx: Port index (1-based)
+            mode: PoE mode ("auto", "off", "pasv24", "passthrough")
+            site: Site name
+        
+        Returns:
+            bool: True if command successful
+        """
+        site = site or self.site
+        endpoint = f"/api/s/{site}/rest/device/{device_id}"
+        
+        payload = {
+            "port_overrides": [
+                {
+                    "port_idx": port_idx,
+                    "poe_mode": mode
+                }
+            ]
+        }
+        
+        try:
+            await self._request("PUT", endpoint, json=payload)
+            logger.info(f"✅ Set PoE mode '{mode}' on device {device_id} port {port_idx}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set PoE mode on device {device_id} port {port_idx}: {e}")
+            return False
+    
+    async def power_cycle_port(
+        self,
+        device_id: str,
+        port_idx: int,
+        off_duration: Optional[int] = None,
+        site: Optional[str] = None
+    ) -> bool:
+        """
+        Cycle a port (disable/enable or PoE off/on).
+        
+        Args:
+            device_id: Device MAC address
+            port_idx: Port index (1-based)
+            off_duration: Seconds to keep port/PoE off (default 15)
+            site: Optional site name
+            poe_only: If True, only cycle PoE. If False, disable/enable the port entirely.
+        """
+        logger.info(f"Starting port cycle for device {device_id} port {port_idx} (poe_only={poe_only})")
+        
+        if poe_only:
+            # Turn off PoE
+            await self.set_poe_mode(device_id, port_idx, "off", site)
+        else:
+            # Disable port entirely
+            await self.set_port_enabled(device_id, port_idx, False, site)
+        
+        # Wait
+        logger.info(f"Waiting {off_duration} seconds...")
+        await asyncio.sleep(off_duration)
+        
+        if poe_only:
+            # Turn PoE back on
+            await self.set_poe_mode(device_id, port_idx, "auto", site)
+        else:
+            # Enable port
+            await self.set_port_enabled(device_id, port_idx, True, site)
+        
+        logger.info(f"Port cycle completed for device {device_id} port {port_idx}")
+        return {"status": "success", "message": f"Port {port_idx} cycled"}
+    
+    async def power_cycle_port(self, device_id: str, port_idx: int, off_duration: int = 15, site: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Power cycle a PoE port (turn off, wait, turn back on).
+        
+        Args:
+            device_id: Device MAC address
+            port_idx: Port index (1-based)
+            off_duration: Seconds to keep power off (default 15)
+            site: Optional site name
+        """
+        return await self.cycle_port(device_id, port_idx, off_duration, site, poe_only=True)
+    
+    async def wait_for_device_online(
+        self,
+        device_id: str,
+        timeout: Optional[int] = None,
+        poll_interval: int = 10,
+        site: Optional[str] = None
+    ) -> bool:
+        """
+        Wait for a device to come back online after reboot.
+        
+        Args:
+            device_id: Device ID or MAC
+            timeout: Max seconds to wait (defaults to config)
+            poll_interval: Seconds between status checks
+            site: Site name
+        
+        Returns:
+            bool: True if device came online within timeout
+        """
+        timeout = timeout or settings.device_online_timeout
+        site = site or self.site
+        
+        logger.info(f"Waiting for device {device_id} to come online (timeout: {timeout}s)")
+        
+        start_time = asyncio.get_event_loop().time()
+        
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            
+            if elapsed >= timeout:
+                logger.warning(f"⏱️ Timeout waiting for device {device_id} to come online")
+                return False
+            
+            try:
+                device = await self.get_device_by_id(device_id, site)
+                
+                if device and device.get("state") == 1:
+                    logger.info(f"✅ Device {device_id} is online (took {elapsed:.1f}s)")
+                    return True
+                
+                logger.debug(f"Device {device_id} still offline, waiting... ({elapsed:.1f}s elapsed)")
+                
+            except Exception as e:
+                logger.debug(f"Error checking device status: {e}")
+            
+            await asyncio.sleep(poll_interval)
+    
+    async def get_switch_ports(self, device_id: str, site: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get port information for a switch.
+        
+        Args:
+            device_id: Switch device ID or MAC
+            site: Site name
+        
+        Returns:
+            List of port dictionaries
+        """
+        device = await self.get_device_by_id(device_id, site)
+        
+        if not device:
+            return []
+        
+        return device.get("port_table", [])
+    
+    def format_device_info(self, device: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Format device information for display.
+        
+        Args:
+            device: Raw device data from API
+        
+        Returns:
+            Formatted device dictionary
+        """
+        return {
+            "id": device.get("_id"),
+            "mac": device.get("mac"),
+            "name": device.get("name", "Unknown"),
+            "model": device.get("model", "Unknown"),
+            "type": device.get("type", "unknown"),
+            "ip": device.get("ip", "N/A"),
+            "state": device.get("state", 0),
+            "online": device.get("state") == 1,
+            "adopted": device.get("adopted", False),
+            "version": device.get("version", "N/A"),
+            "uptime": device.get("uptime", 0),
+            "last_seen": device.get("last_seen", 0),
+            "site_id": device.get("site_id"),
+            "is_switch": device.get("type") in ["usw", "switch"],
+            "is_ap": device.get("type") in ["uap", "ap"],
+            "port_count": len(device.get("port_table", [])),
+        }
+
+
+async def test_connection() -> bool:
+    """
+    Test UniFi controller connection and list devices.
+    
+    Returns:
+        bool: True if connection successful
+    """
+    try:
+        async with UniFiClient() as client:
+            # Get sites
+            sites = await client.get_sites()
+            print(f"\n📍 Found {len(sites)} site(s):")
+            for site in sites:
+                print(f"  - {site.get('desc', site.get('name'))}")
+            
+            # Get devices
+            devices = await client.get_devices()
+            print(f"\n🔌 Found {len(devices)} device(s):\n")
+            
+            for device in devices:
+                info = client.format_device_info(device)
+                status = "🟢 Online" if info["online"] else "🔴 Offline"
+                device_type = "🔀 Switch" if info["is_switch"] else "📡 AP" if info["is_ap"] else "❓ Other"
+                
+                print(f"{status} {device_type} {info['name']}")
+                print(f"   Model: {info['model']}")
+                print(f"   IP: {info['ip']}")
+                print(f"   MAC: {info['mac']}")
+                
+                if info["is_switch"]:
+                    print(f"   Ports: {info['port_count']}")
+                
+                print()
+            
+            return True
+            
+    except Exception as e:
+        logger.error(f"Connection test failed: {e}")
+        print(f"\n❌ Connection test failed: {e}")
+        return False
