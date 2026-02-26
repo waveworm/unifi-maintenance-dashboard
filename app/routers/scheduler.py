@@ -6,7 +6,7 @@ from sqlalchemy import select, delete
 from datetime import datetime
 
 from app.database import get_db
-from app.models import Schedule, JobRun, PoESchedule
+from app.models import Schedule, JobRun, PoESchedule, ScheduleTemplate
 from app.schemas import (
     ScheduleCreate,
     ScheduleUpdate,
@@ -14,7 +14,9 @@ from app.schemas import (
     JobRunResponse,
     PoEScheduleCreate,
     PoEScheduleUpdate,
-    PoEScheduleResponse
+    PoEScheduleResponse,
+    ScheduleTemplateCreate,
+    ScheduleTemplateResponse,
 )
 from app.scheduler_engine import scheduler_engine
 from app.unifi_client import UniFiClient
@@ -543,27 +545,115 @@ async def toggle_poe_schedule(schedule_id: int, db: AsyncSession = Depends(get_d
     try:
         result = await db.execute(select(PoESchedule).where(PoESchedule.id == schedule_id))
         schedule = result.scalar_one_or_none()
-        
+
         if not schedule:
             raise HTTPException(status_code=404, detail="PoE schedule not found")
-        
+
         schedule.enabled = not schedule.enabled
         schedule.updated_at = datetime.utcnow()
-        
+
         await db.commit()
         await db.refresh(schedule)
-        
+
         status = "enabled" if schedule.enabled else "disabled"
         logger.info(f"PoE schedule {schedule_id} {status}")
 
         # Reload scheduler to enable/disable PoE schedule
         await scheduler_engine.reload_schedules()
-        
+
         return {"success": True, "enabled": schedule.enabled}
-        
+
     except HTTPException:
         raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to toggle PoE schedule {schedule_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Schedule Templates
+
+@router.get("/schedule-templates", response_model=List[ScheduleTemplateResponse])
+async def list_schedule_templates(
+    type: str = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all schedule templates, optionally filtered by type."""
+    try:
+        query = select(ScheduleTemplate).order_by(ScheduleTemplate.created_at.desc())
+        if type:
+            query = query.where(ScheduleTemplate.template_type == type)
+        result = await db.execute(query)
+        return result.scalars().all()
+    except Exception as e:
+        logger.error(f"Failed to list schedule templates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/schedule-templates", response_model=ScheduleTemplateResponse)
+async def create_schedule_template(
+    template: ScheduleTemplateCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new schedule template."""
+    try:
+        db_template = ScheduleTemplate(**template.dict())
+        db.add(db_template)
+        await db.commit()
+        await db.refresh(db_template)
+        logger.info(f"Created schedule template: {template.name}")
+        return db_template
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to create schedule template: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/schedule-templates/{template_id}", response_model=ScheduleTemplateResponse)
+async def update_schedule_template(
+    template_id: int,
+    template_update: ScheduleTemplateCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update an existing schedule template."""
+    try:
+        result = await db.execute(select(ScheduleTemplate).where(ScheduleTemplate.id == template_id))
+        template = result.scalar_one_or_none()
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+        for field, value in template_update.dict().items():
+            setattr(template, field, value)
+        template.updated_at = datetime.utcnow()
+
+        await db.commit()
+        await db.refresh(template)
+        logger.info(f"Updated schedule template {template_id}")
+        return template
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to update schedule template {template_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/schedule-templates/{template_id}")
+async def delete_schedule_template(template_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete a schedule template."""
+    try:
+        result = await db.execute(select(ScheduleTemplate).where(ScheduleTemplate.id == template_id))
+        template = result.scalar_one_or_none()
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+        await db.delete(template)
+        await db.commit()
+        logger.info(f"Deleted schedule template {template_id}")
+        return {"success": True, "message": f"Template {template_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Failed to delete schedule template {template_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))

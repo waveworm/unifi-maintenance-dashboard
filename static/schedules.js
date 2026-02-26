@@ -5,6 +5,7 @@ class SchedulesManager {
         this.schedules = [];
         this.poeSchedules = [];
         this.jobs = [];
+        this.templates = [];
         this.jobsRefreshIntervalMs = 15000;
         this.jobsRefreshTimer = null;
         this.sites = [];
@@ -14,6 +15,8 @@ class SchedulesManager {
         this.editingScheduleId = null;
         this.editingDeviceIds = [];
         this.editingPoeScheduleId = null;
+        this.editingTemplateId = null;
+        this._templatePickerForType = null;
         this.init();
     }
 
@@ -24,6 +27,7 @@ class SchedulesManager {
         await this.loadSchedules();
         await this.loadPoeSchedules();
         await this.loadJobs();
+        await this.loadTemplates();
         this.startJobsAutoRefresh();
     }
 
@@ -33,13 +37,15 @@ class SchedulesManager {
             btn.addEventListener('click', (e) => {
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                
+
                 e.target.classList.add('active');
                 const tabId = e.target.dataset.tab;
                 document.getElementById(tabId).classList.add('active');
 
                 if (tabId === 'job-history') {
                     this.loadJobs();
+                } else if (tabId === 'templates') {
+                    this.loadTemplates();
                 }
             });
         });
@@ -101,6 +107,52 @@ class SchedulesManager {
                 this.closeModal();
             });
         });
+
+        // Templates
+        const newTemplateBtn = document.getElementById('newTemplateBtn');
+        if (newTemplateBtn) {
+            newTemplateBtn.addEventListener('click', () => this.showTemplateModal());
+        }
+
+        const templateForm = document.getElementById('templateForm');
+        if (templateForm) {
+            templateForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.saveTemplate();
+            });
+        }
+
+        const templateTypeSelect = document.getElementById('templateTypeSelect');
+        if (templateTypeSelect) {
+            templateTypeSelect.addEventListener('change', (e) => {
+                this.updateTemplateTypeFields(e.target.value);
+            });
+        }
+
+        const templateFreqSelect = document.getElementById('templateFrequencySelect');
+        if (templateFreqSelect) {
+            templateFreqSelect.addEventListener('change', (e) => {
+                this.updateTemplateFrequencyFields(e.target.value);
+            });
+        }
+
+        const tmplRollingMode = document.getElementById('tmplRollingMode');
+        if (tmplRollingMode) {
+            tmplRollingMode.addEventListener('change', (e) => {
+                document.getElementById('tmplRollingOptions').style.display = e.target.checked ? 'block' : 'none';
+            });
+        }
+
+        // Load Template buttons in create modals
+        const loadTmplForSchedule = document.getElementById('loadTemplateForSchedule');
+        if (loadTmplForSchedule) {
+            loadTmplForSchedule.addEventListener('click', () => this.showTemplatePicker('device_reboot'));
+        }
+
+        const loadTmplForPort = document.getElementById('loadTemplateForPort');
+        if (loadTmplForPort) {
+            loadTmplForPort.addEventListener('click', () => this.showTemplatePicker('port_cycle'));
+        }
     }
 
     async loadSites() {
@@ -1087,6 +1139,254 @@ class SchedulesManager {
         } catch (error) {
             console.error('Error saving port schedule:', error);
             this.showAlert('❌ Failed to save port schedule: ' + error.message, 'error');
+        }
+    }
+
+    // ─── Schedule Templates ────────────────────────────────────────────────
+
+    async loadTemplates() {
+        try {
+            const response = await fetch('/api/schedule-templates');
+            if (!response.ok) throw new Error('Failed to fetch templates');
+            this.templates = await response.json();
+            this.renderTemplates();
+        } catch (error) {
+            console.error('Error loading templates:', error);
+            const list = document.getElementById('templatesList');
+            if (list) list.innerHTML = '<p style="color:var(--text-secondary)">Failed to load templates.</p>';
+        }
+    }
+
+    renderTemplates() {
+        const container = document.getElementById('templatesList');
+        if (!container) return;
+
+        if (this.templates.length === 0) {
+            container.innerHTML = `
+                <div style="text-align:center;padding:40px;color:var(--text-secondary);">
+                    <div style="font-size:40px;margin-bottom:12px;opacity:0.4">📋</div>
+                    <p>No templates yet. Create one to save a reusable schedule configuration.</p>
+                </div>`;
+            return;
+        }
+
+        container.innerHTML = this.templates.map(t => {
+            const typeLabel = t.template_type === 'device_reboot' ? 'Device Reboot' : 'Port Cycle';
+            const typeClass = t.template_type === 'device_reboot' ? 'tmpl-type-reboot' : 'tmpl-type-port';
+            const freqLabel = t.frequency.charAt(0).toUpperCase() + t.frequency.slice(1);
+            const timeStr = t.time_of_day ? ` @ ${t.time_of_day}` : '';
+            return `
+                <div class="template-card">
+                    <div class="template-card-header">
+                        <span class="template-type-badge ${typeClass}">${typeLabel}</span>
+                        <div class="template-card-actions">
+                            <button class="btn btn-sm" onclick="schedulesManager.showTemplateModal(${t.id})">Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="schedulesManager.deleteTemplate(${t.id})">Delete</button>
+                        </div>
+                    </div>
+                    <div class="template-card-name">${this.escapeHtml(t.name)}</div>
+                    ${t.description ? `<div class="template-card-desc">${this.escapeHtml(t.description)}</div>` : ''}
+                    <div class="template-card-meta">
+                        <span>🕐 ${freqLabel}${timeStr}</span>
+                        ${t.template_type === 'device_reboot' && t.rolling_mode ? '<span>🔄 Rolling</span>' : ''}
+                        ${t.template_type === 'port_cycle' ? `<span>${t.poe_only ? '⚡ PoE Only' : '🔌 Full Port'}</span>` : ''}
+                        ${t.template_type === 'port_cycle' && t.off_duration ? `<span>${t.off_duration}s off</span>` : ''}
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    showTemplateModal(templateId = null) {
+        const modal = document.getElementById('templateModal');
+        const form = document.getElementById('templateForm');
+        form.reset();
+        this.editingTemplateId = templateId;
+
+        document.getElementById('tmplRollingOptions').style.display = 'none';
+        document.getElementById('tmplDayOfWeekGroup').style.display = 'none';
+        document.getElementById('tmplDayOfMonthGroup').style.display = 'none';
+        this.updateTemplateTypeFields('device_reboot');
+
+        if (templateId) {
+            const t = this.templates.find(t => t.id === templateId);
+            if (!t) return;
+
+            document.getElementById('templateModalTitle').textContent = 'Edit Template';
+            document.getElementById('templateSubmitBtn').textContent = 'Update Template';
+
+            form.querySelector('input[name="name"]').value = t.name;
+            form.querySelector('textarea[name="description"]').value = t.description || '';
+            form.querySelector('select[name="template_type"]').value = t.template_type;
+            form.querySelector('select[name="frequency"]').value = t.frequency;
+            if (t.time_of_day) form.querySelector('input[name="time_of_day"]').value = t.time_of_day;
+            if (t.day_of_week != null) form.querySelector('select[name="day_of_week"]').value = t.day_of_week;
+            if (t.day_of_month != null) form.querySelector('input[name="day_of_month"]').value = t.day_of_month;
+
+            this.updateTemplateTypeFields(t.template_type);
+            this.updateTemplateFrequencyFields(t.frequency);
+
+            if (t.template_type === 'device_reboot') {
+                const rollingCb = document.getElementById('tmplRollingMode');
+                rollingCb.checked = t.rolling_mode ?? false;
+                document.getElementById('tmplRollingOptions').style.display = rollingCb.checked ? 'block' : 'none';
+                if (t.delay_between_devices != null) form.querySelector('input[name="delay_between_devices"]').value = t.delay_between_devices;
+                if (t.max_wait_time != null) form.querySelector('input[name="max_wait_time"]').value = t.max_wait_time;
+                if (t.continue_on_failure) form.querySelector('input[name="continue_on_failure"]').checked = t.continue_on_failure;
+            } else {
+                if (t.poe_only != null) form.querySelector('select[name="poe_only"]').value = t.poe_only ? 'true' : 'false';
+                if (t.off_duration != null) form.querySelector('input[name="off_duration"]').value = t.off_duration;
+            }
+        } else {
+            document.getElementById('templateModalTitle').textContent = 'New Schedule Template';
+            document.getElementById('templateSubmitBtn').textContent = 'Save Template';
+        }
+
+        modal.classList.add('active');
+    }
+
+    updateTemplateTypeFields(type) {
+        document.getElementById('tmplDeviceRebootFields').style.display = type === 'device_reboot' ? 'block' : 'none';
+        document.getElementById('tmplPortCycleFields').style.display = type === 'port_cycle' ? 'block' : 'none';
+    }
+
+    updateTemplateFrequencyFields(frequency) {
+        document.getElementById('tmplDayOfWeekGroup').style.display = frequency === 'weekly' ? 'block' : 'none';
+        document.getElementById('tmplDayOfMonthGroup').style.display = frequency === 'monthly' ? 'block' : 'none';
+    }
+
+    async saveTemplate() {
+        const form = document.getElementById('templateForm');
+        const formData = new FormData(form);
+        const type = formData.get('template_type');
+        const freq = formData.get('frequency');
+
+        const payload = {
+            name: formData.get('name'),
+            description: formData.get('description') || null,
+            template_type: type,
+            frequency: freq,
+            time_of_day: formData.get('time_of_day') || null,
+            day_of_week: freq === 'weekly' ? parseInt(formData.get('day_of_week')) : null,
+            day_of_month: freq === 'monthly' ? parseInt(formData.get('day_of_month')) : null,
+            rolling_mode: null,
+            delay_between_devices: null,
+            max_wait_time: null,
+            continue_on_failure: null,
+            poe_only: null,
+            off_duration: null,
+        };
+
+        if (type === 'device_reboot') {
+            payload.rolling_mode = formData.get('rolling_mode') === 'on';
+            if (payload.rolling_mode) {
+                payload.delay_between_devices = parseInt(formData.get('delay_between_devices')) || 60;
+                payload.max_wait_time = parseInt(formData.get('max_wait_time')) || 300;
+                payload.continue_on_failure = formData.get('continue_on_failure') === 'on';
+            }
+        } else {
+            payload.poe_only = formData.get('poe_only') === 'true';
+            payload.off_duration = parseInt(formData.get('off_duration')) || 15;
+        }
+
+        try {
+            const isEdit = Boolean(this.editingTemplateId);
+            const endpoint = isEdit ? `/api/schedule-templates/${this.editingTemplateId}` : '/api/schedule-templates';
+            const method = isEdit ? 'PUT' : 'POST';
+            const response = await fetch(endpoint, {
+                method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.detail || 'Failed to save template');
+            }
+
+            this.showAlert(isEdit ? '✅ Template updated' : '✅ Template created', 'success');
+            this.closeModal();
+            this.editingTemplateId = null;
+            await this.loadTemplates();
+        } catch (error) {
+            console.error('Error saving template:', error);
+            this.showAlert('❌ Failed to save template: ' + error.message, 'error');
+        }
+    }
+
+    async deleteTemplate(templateId) {
+        const t = this.templates.find(t => t.id === templateId);
+        if (!confirm(`Delete template "${t?.name}"?`)) return;
+
+        try {
+            const response = await fetch(`/api/schedule-templates/${templateId}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error('Failed to delete template');
+            this.showAlert('✅ Template deleted', 'success');
+            await this.loadTemplates();
+        } catch (error) {
+            this.showAlert('❌ Failed to delete template: ' + error.message, 'error');
+        }
+    }
+
+    showTemplatePicker(forType) {
+        this._templatePickerForType = forType;
+        const filtered = this.templates.filter(t => t.template_type === forType);
+        const container = document.getElementById('templatePickerList');
+
+        if (filtered.length === 0) {
+            container.innerHTML = `<p style="color:var(--text-secondary);padding:12px;">No ${forType === 'device_reboot' ? 'device reboot' : 'port cycle'} templates yet. Create one in the Templates tab.</p>`;
+        } else {
+            container.innerHTML = filtered.map(t => {
+                const freqLabel = t.frequency.charAt(0).toUpperCase() + t.frequency.slice(1);
+                const timeStr = t.time_of_day ? ` @ ${t.time_of_day}` : '';
+                return `
+                    <div class="template-picker-item" onclick="schedulesManager.applyTemplate(${t.id})">
+                        <div class="template-picker-name">${this.escapeHtml(t.name)}</div>
+                        <div class="template-picker-meta">
+                            ${freqLabel}${timeStr}
+                            ${t.template_type === 'device_reboot' && t.rolling_mode ? ' · Rolling' : ''}
+                            ${t.template_type === 'port_cycle' ? ` · ${t.poe_only ? 'PoE Only' : 'Full Port'} · ${t.off_duration}s` : ''}
+                        </div>
+                        ${t.description ? `<div class="template-picker-desc">${this.escapeHtml(t.description)}</div>` : ''}
+                    </div>`;
+            }).join('');
+        }
+
+        document.getElementById('templatePickerModal').classList.add('active');
+    }
+
+    applyTemplate(templateId) {
+        const t = this.templates.find(t => t.id === templateId);
+        if (!t) return;
+
+        this.closeModal();
+
+        if (t.template_type === 'device_reboot') {
+            const form = document.getElementById('scheduleForm');
+            form.querySelector('select[name="frequency"]').value = t.frequency;
+            if (t.time_of_day) form.querySelector('input[name="time_of_day"]').value = t.time_of_day;
+            if (t.day_of_week != null) form.querySelector('select[name="day_of_week"]').value = t.day_of_week;
+            if (t.day_of_month != null) form.querySelector('input[name="day_of_month"]').value = t.day_of_month;
+            this.updateFrequencyFields(t.frequency);
+
+            const rollingCb = document.getElementById('rollingModeCheck');
+            rollingCb.checked = t.rolling_mode ?? false;
+            document.getElementById('rollingOptions').style.display = rollingCb.checked ? 'block' : 'none';
+            if (t.rolling_mode) {
+                if (t.delay_between_devices != null) form.querySelector('input[name="delay_between_devices"]').value = t.delay_between_devices;
+                if (t.max_wait_time != null) form.querySelector('input[name="max_wait_time"]').value = t.max_wait_time;
+                if (t.continue_on_failure != null) form.querySelector('input[name="continue_on_failure"]').checked = t.continue_on_failure;
+            }
+            document.getElementById('scheduleModal').classList.add('active');
+        } else {
+            const form = document.getElementById('portScheduleForm');
+            form.querySelector('select[name="frequency"]').value = t.frequency;
+            if (t.time_of_day) form.querySelector('input[name="time_of_day"]').value = t.time_of_day;
+            if (t.day_of_week != null) form.querySelector('select[name="day_of_week"]').value = t.day_of_week;
+            if (t.day_of_month != null) form.querySelector('input[name="day_of_month"]').value = t.day_of_month;
+            this.updatePortFrequencyFields(t.frequency);
+            if (t.poe_only != null) form.querySelector('select[name="poe_only"]').value = t.poe_only ? 'true' : 'false';
+            if (t.off_duration != null) form.querySelector('input[name="off_duration"]').value = t.off_duration;
+            document.getElementById('portScheduleModal').classList.add('active');
         }
     }
 }

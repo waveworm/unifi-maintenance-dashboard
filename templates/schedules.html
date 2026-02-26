@@ -31,6 +31,7 @@
             <button class="tab-btn active" data-tab="device-schedules">Device Reboots</button>
             <button class="tab-btn" data-tab="port-schedules">Port Cycles</button>
             <button class="tab-btn" data-tab="job-history">Job History</button>
+            <button class="tab-btn" data-tab="templates">Templates</button>
         </div>
 
         <!-- Device Reboot Schedules -->
@@ -65,6 +66,17 @@
                 </div>
             </div>
         </div>
+
+        <!-- Schedule Templates -->
+        <div id="templates" class="tab-content">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <p style="color:var(--text-secondary);font-size:14px;">Save reusable schedule configurations. Load a template when creating a new schedule to pre-fill timing and mode settings.</p>
+                <button class="btn btn-primary" id="newTemplateBtn">+ New Template</button>
+            </div>
+            <div id="templatesList" class="template-grid">
+                <div class="loading"><div class="spinner"></div> Loading templates...</div>
+            </div>
+        </div>
     </main>
 
     <!-- New Schedule Modal -->
@@ -72,7 +84,10 @@
         <div class="modal-content modal-large">
             <div class="modal-header">
                 <h3>Create Device Reboot Schedule</h3>
-                <button class="close-btn">&times;</button>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button type="button" class="btn btn-sm template-load-btn" id="loadTemplateForSchedule" data-for="device_reboot">📋 Load Template</button>
+                    <button class="close-btn">&times;</button>
+                </div>
             </div>
             <form id="scheduleForm">
                 <div class="form-group">
@@ -177,7 +192,10 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h3>Create Port Cycle Schedule</h3>
-                <button class="close-btn">&times;</button>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button type="button" class="btn btn-sm template-load-btn" id="loadTemplateForPort" data-for="port_cycle">📋 Load Template</button>
+                    <button class="close-btn">&times;</button>
+                </div>
             </div>
             <form id="portScheduleForm">
                 <div class="form-group">
@@ -271,6 +289,139 @@
         </div>
     </div>
 
-    <script src="/static/schedules.js?v=20260225193200"></script>
+    <!-- Template Create/Edit Modal -->
+    <div id="templateModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="templateModalTitle">New Schedule Template</h3>
+                <button class="close-btn">&times;</button>
+            </div>
+            <form id="templateForm">
+                <div class="form-group">
+                    <label>Template Name *</label>
+                    <input type="text" name="name" required placeholder="e.g., Nightly AP Reboot">
+                </div>
+
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea name="description" rows="2" placeholder="What is this template used for?"></textarea>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Template Type *</label>
+                        <select name="template_type" id="templateTypeSelect" required>
+                            <option value="device_reboot">Device Reboot</option>
+                            <option value="port_cycle">Port Cycle</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Frequency *</label>
+                        <select name="frequency" id="templateFrequencySelect" required>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="hourly">Hourly</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Time of Day</label>
+                        <input type="time" name="time_of_day" value="02:00">
+                    </div>
+
+                    <div class="form-group" id="tmplDayOfWeekGroup" style="display:none;">
+                        <label>Day of Week</label>
+                        <select name="day_of_week">
+                            <option value="0">Monday</option>
+                            <option value="1">Tuesday</option>
+                            <option value="2">Wednesday</option>
+                            <option value="3">Thursday</option>
+                            <option value="4">Friday</option>
+                            <option value="5">Saturday</option>
+                            <option value="6">Sunday</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="tmplDayOfMonthGroup" style="display:none;">
+                        <label>Day of Month</label>
+                        <input type="number" name="day_of_month" min="1" max="31" value="1">
+                    </div>
+                </div>
+
+                <!-- Device Reboot specific fields -->
+                <div id="tmplDeviceRebootFields">
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="rolling_mode" id="tmplRollingMode">
+                            Rolling Mode (reboot one device at a time)
+                        </label>
+                    </div>
+                    <div id="tmplRollingOptions" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Delay Between Devices (seconds)</label>
+                                <input type="number" name="delay_between_devices" min="0" value="60">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Wait Time (seconds)</label>
+                                <input type="number" name="max_wait_time" min="0" value="300">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="continue_on_failure">
+                                Continue on failure
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Port Cycle specific fields -->
+                <div id="tmplPortCycleFields" style="display:none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Cycle Type</label>
+                            <select name="poe_only">
+                                <option value="true">PoE Only (power cycle)</option>
+                                <option value="false">Full Port (disable/enable)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Off Duration (seconds)</label>
+                            <input type="number" name="off_duration" min="5" max="300" value="15">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn close-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="templateSubmitBtn">Save Template</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Template Picker Modal -->
+    <div id="templatePickerModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Load a Template</h3>
+                <button class="close-btn">&times;</button>
+            </div>
+            <p style="color:var(--text-secondary);font-size:14px;margin-bottom:16px;">
+                Select a template to pre-fill the form. You can still edit any values after loading.
+            </p>
+            <div id="templatePickerList" class="template-picker-list"></div>
+            <div class="modal-actions">
+                <button class="btn close-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/schedules.js?v=20260226001"></script>
 </body>
 </html>

@@ -450,3 +450,140 @@ input:checked + .toggle-slider:before {
     font-size: 48px;
     margin-bottom: 15px;
 }
+
+/* ── Schedule Templates ───────────────────────────────────────── */
+
+.template-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+}
+
+.template-card {
+    background: var(--bg-card, #1a1a26);
+    border: 1px solid var(--border, #2d2d3f);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.15s;
+}
+
+.template-card:hover {
+    border-color: var(--primary, #4da6ff);
+}
+
+.template-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.template-card-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.template-type-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.tmpl-type-reboot {
+    background: rgba(77, 166, 255, 0.15);
+    color: #4da6ff;
+    border: 1px solid rgba(77, 166, 255, 0.3);
+}
+
+.tmpl-type-port {
+    background: rgba(241, 157, 56, 0.15);
+    color: #f19d38;
+    border: 1px solid rgba(241, 157, 56, 0.3);
+}
+
+.template-card-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-primary, #e4e6eb);
+}
+
+.template-card-desc {
+    font-size: 13px;
+    color: var(--text-secondary, #8b8fa3);
+    line-height: 1.4;
+}
+
+.template-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.template-card-meta span {
+    font-size: 12px;
+    color: var(--text-muted, #6c6f80);
+    background: rgba(255,255,255,0.05);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+/* Template Picker */
+
+.template-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.template-picker-item {
+    padding: 12px 14px;
+    border: 1px solid var(--border, #2d2d3f);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.template-picker-item:hover {
+    border-color: var(--primary, #4da6ff);
+    background: rgba(77, 166, 255, 0.06);
+}
+
+.template-picker-name {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 3px;
+}
+
+.template-picker-meta {
+    font-size: 12px;
+    color: var(--text-secondary, #8b8fa3);
+}
+
+.template-picker-desc {
+    font-size: 12px;
+    color: var(--text-muted, #6c6f80);
+    margin-top: 3px;
+}
+
+/* Load Template button in modal headers */
+.template-load-btn {
+    background: rgba(255,255,255,0.06);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.template-load-btn:hover {
+    background: rgba(255,255,255,0.1);
+    color: var(--text-primary);
+}

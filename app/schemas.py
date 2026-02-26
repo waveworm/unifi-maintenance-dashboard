@@ -216,6 +216,45 @@ class PoEScheduleResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     last_run_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
+
+
+class BulkRebootRequest(BaseModel):
+    """Request to reboot multiple devices at once."""
+    device_ids: List[str] = Field(..., min_length=1)
+    site: Optional[str] = Field(default=None, description="Site name (optional)")
+    wait_for_online: bool = Field(default=False)
+
+
+class ScheduleTemplateCreate(BaseModel):
+    """Create a reusable schedule configuration template."""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    template_type: str = Field(..., description="device_reboot or port_cycle")
+    frequency: str = Field(..., description="hourly, daily, weekly, monthly")
+    time_of_day: Optional[str] = Field(None, description="HH:MM format")
+    day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    day_of_month: Optional[int] = Field(None, ge=1, le=31)
+    # Device reboot specific
+    rolling_mode: Optional[bool] = None
+    delay_between_devices: Optional[int] = Field(None, ge=0)
+    max_wait_time: Optional[int] = Field(None, ge=0)
+    continue_on_failure: Optional[bool] = None
+    # Port cycle specific
+    poe_only: Optional[bool] = None
+    off_duration: Optional[int] = Field(None, ge=5, le=300)
+
+
+class ScheduleTemplateResponse(ScheduleTemplateCreate):
+    """Schedule template response schema."""
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }

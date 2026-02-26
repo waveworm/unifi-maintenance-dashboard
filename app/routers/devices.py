@@ -10,6 +10,7 @@ from app.schemas import (
     DeviceInfo,
     PortInfo,
     RebootRequest,
+    BulkRebootRequest,
     PoEControlRequest,
     PoEPowerCycleRequest,
     PortCycleRequest,
@@ -137,6 +138,59 @@ async def reboot_device(
     except Exception as e:
         logger.error(f"Failed to reboot device: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/devices/bulk-reboot")
+async def bulk_reboot_devices(
+    request: BulkRebootRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Reboot multiple devices at once (parallel, fire-and-forget)."""
+    rebooted = []
+    failed = []
+
+    try:
+        async with UniFiClient() as client:
+            for device_id in request.device_ids:
+                try:
+                    device = await client.get_device_by_id(device_id, request.site)
+                    if not device:
+                        failed.append({"device_id": device_id, "error": "Device not found"})
+                        continue
+
+                    device_name = device.get("name", "Unknown")
+                    device_mac = device.get("mac", device_id)
+
+                    await client.reboot_device(device_mac, request.site)
+
+                    await log_audit(
+                        db, "reboot", device_mac, device_name,
+                        user_ip=http_request.client.host,
+                        details={"bulk": True, "total": len(request.device_ids)}
+                    )
+                    rebooted.append({"device_id": device_id, "device_name": device_name})
+
+                except Exception as e:
+                    logger.error(f"Bulk reboot failed for device {device_id}: {e}")
+                    failed.append({"device_id": device_id, "error": str(e)})
+                    await log_audit(
+                        db, "reboot", device_id, None,
+                        user_ip=http_request.client.host,
+                        details={"bulk": True},
+                        success=False,
+                        error_message=str(e)
+                    )
+    except Exception as e:
+        logger.error(f"Bulk reboot failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {
+        "success": len(failed) == 0,
+        "rebooted": rebooted,
+        "failed": failed,
+        "total": len(request.device_ids)
+    }
 
 
 @router.post("/devices/poe/control")

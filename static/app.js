@@ -8,6 +8,7 @@ class UniFiDashboard {
         this.searchQuery = '';
         this.currentSite = null;
         this.sites = [];
+        this.selectedDevices = new Set();
         this.init();
     }
 
@@ -70,6 +71,12 @@ class UniFiDashboard {
                 }
             });
         });
+
+        // Bulk reboot confirm
+        const confirmBulkReboot = document.getElementById('confirmBulkReboot');
+        if (confirmBulkReboot) {
+            confirmBulkReboot.addEventListener('click', () => this.executeBulkReboot());
+        }
     }
 
     async loadSites() {
@@ -116,7 +123,11 @@ class UniFiDashboard {
     async loadDevices() {
         const loading = document.getElementById('loading');
         const devicesContainer = document.getElementById('devicesContainer');
-        
+
+        // Clear selection when loading new devices
+        this.selectedDevices.clear();
+        this.updateBulkToolbar();
+
         if (loading) loading.style.display = 'block';
         if (devicesContainer) devicesContainer.style.display = 'none';
 
@@ -195,11 +206,15 @@ class UniFiDashboard {
         const statusText = device.online ? 'Online' : 'Offline';
         const deviceIcon = device.is_switch ? '🔀' : device.is_ap ? '📡' : '❓';
         const deviceType = device.is_switch ? 'Switch' : device.is_ap ? 'Access Point' : 'Device';
-        
+        const isSelected = this.selectedDevices.has(device.id);
+
         const uptime = device.online ? this.formatUptime(device.uptime) : 'N/A';
 
         return `
-            <div class="device-card" data-device-id="${device.id}">
+            <div class="device-card selectable${isSelected ? ' selected' : ''}" data-device-id="${device.id}">
+                <label class="device-select-area" title="Select for bulk action">
+                    <input type="checkbox" class="device-select-cb" data-device-id="${device.id}" ${isSelected ? 'checked' : ''}>
+                </label>
                 <div class="device-header">
                     <div class="device-info">
                         <h3>${this.escapeHtml(device.name)}</h3>
@@ -251,8 +266,9 @@ class UniFiDashboard {
         // Reboot buttons
         document.querySelectorAll('.reboot-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                const deviceId = e.target.dataset.deviceId;
-                const deviceName = e.target.dataset.deviceName;
+                e.stopPropagation();
+                const deviceId = btn.dataset.deviceId;
+                const deviceName = btn.dataset.deviceName;
                 this.showRebootModal(deviceId, deviceName);
             });
         });
@@ -260,11 +276,138 @@ class UniFiDashboard {
         // PoE buttons
         document.querySelectorAll('.poe-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
-                const deviceId = e.target.dataset.deviceId;
-                const deviceName = e.target.dataset.deviceName;
+                e.stopPropagation();
+                const deviceId = btn.dataset.deviceId;
+                const deviceName = btn.dataset.deviceName;
                 await this.showPoeModal(deviceId, deviceName);
             });
         });
+
+        // Selection checkboxes
+        document.querySelectorAll('.device-select-cb').forEach(cb => {
+            cb.addEventListener('change', (e) => {
+                e.stopPropagation();
+                this.toggleDeviceSelection(cb.dataset.deviceId);
+            });
+        });
+
+        // Card click toggles selection (ignore clicks on buttons/checkboxes)
+        document.querySelectorAll('.device-card.selectable').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('button') || e.target.closest('.device-select-area')) return;
+                this.toggleDeviceSelection(card.dataset.deviceId);
+            });
+        });
+    }
+
+    toggleDeviceSelection(deviceId) {
+        if (this.selectedDevices.has(deviceId)) {
+            this.selectedDevices.delete(deviceId);
+        } else {
+            this.selectedDevices.add(deviceId);
+        }
+        this.updateBulkToolbar();
+
+        // Update this card's visual state without re-rendering
+        const card = document.querySelector(`.device-card[data-device-id="${deviceId}"]`);
+        if (card) {
+            card.classList.toggle('selected', this.selectedDevices.has(deviceId));
+            const cb = card.querySelector('.device-select-cb');
+            if (cb) cb.checked = this.selectedDevices.has(deviceId);
+        }
+    }
+
+    updateBulkToolbar() {
+        const count = this.selectedDevices.size;
+        const toolbar = document.getElementById('bulkToolbar');
+        const countBadge = document.getElementById('bulkCount');
+
+        if (!toolbar) return;
+
+        if (count > 0) {
+            toolbar.classList.add('visible');
+            countBadge.textContent = `${count} device${count !== 1 ? 's' : ''} selected`;
+        } else {
+            toolbar.classList.remove('visible');
+        }
+    }
+
+    selectAllByType(type) {
+        this.filteredDevices.forEach(device => {
+            let match = false;
+            if (type === 'ap') match = device.is_ap;
+            else if (type === 'switch') match = device.is_switch;
+            else if (type === 'online') match = device.online;
+            if (match) this.selectedDevices.add(device.id);
+        });
+        // Re-render to sync checkbox + selected states
+        this.renderDevices();
+        this.updateBulkToolbar();
+    }
+
+    clearSelection() {
+        this.selectedDevices.clear();
+        this.updateBulkToolbar();
+        document.querySelectorAll('.device-card.selected').forEach(c => c.classList.remove('selected'));
+        document.querySelectorAll('.device-select-cb').forEach(cb => { cb.checked = false; });
+    }
+
+    showBulkRebootModal() {
+        const count = this.selectedDevices.size;
+        if (count === 0) return;
+
+        const selectedObjs = this.devices.filter(d => this.selectedDevices.has(d.id));
+        const list = document.getElementById('bulkRebootDeviceList');
+        list.innerHTML = selectedObjs.map(d =>
+            `<li>${this.escapeHtml(d.name || d.id)} <span style="color:var(--text-secondary);font-size:13px">(${this.escapeHtml(d.model)})</span></li>`
+        ).join('');
+
+        document.getElementById('bulkRebootCount').textContent = count;
+        document.getElementById('bulkRebootModal').classList.add('active');
+    }
+
+    async executeBulkReboot() {
+        const deviceIds = Array.from(this.selectedDevices);
+        if (deviceIds.length === 0) return;
+
+        const btn = document.getElementById('confirmBulkReboot');
+        btn.disabled = true;
+        btn.textContent = 'Sending reboot commands...';
+
+        try {
+            const response = await fetch('/api/devices/bulk-reboot', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    device_ids: deviceIds,
+                    site: this.currentSite,
+                    wait_for_online: false
+                })
+            });
+
+            const data = await response.json();
+            this.closeAllModals();
+            this.clearSelection();
+
+            const successCount = data.rebooted?.length ?? 0;
+            const failCount = data.failed?.length ?? 0;
+
+            if (successCount > 0) {
+                const msg = failCount > 0
+                    ? `Reboot sent to ${successCount} device(s). ${failCount} failed.`
+                    : `Reboot command sent to ${successCount} device(s).`;
+                this.showAlert(`✅ ${msg}`, failCount > 0 ? 'warning' : 'success');
+            } else {
+                this.showAlert('❌ Bulk reboot failed — no devices rebooted.', 'error');
+            }
+
+            setTimeout(() => this.loadDevices(), 3000);
+        } catch (error) {
+            this.showAlert(`❌ Bulk reboot request failed: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🔄 Reboot All Selected';
+        }
     }
 
     showRebootModal(deviceId, deviceName) {

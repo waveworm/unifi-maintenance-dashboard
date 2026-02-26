@@ -62,6 +62,20 @@
             </div>
         </div>
 
+        <!-- Bulk Action Toolbar (hidden until devices are selected) -->
+        <div id="bulkToolbar" class="bulk-toolbar">
+            <div class="bulk-toolbar-left">
+                <span class="bulk-count-badge" id="bulkCount">0 devices selected</span>
+                <button class="btn btn-sm bulk-select-btn" onclick="dashboard.selectAllByType('ap')">Select All APs</button>
+                <button class="btn btn-sm bulk-select-btn" onclick="dashboard.selectAllByType('switch')">Select All Switches</button>
+                <button class="btn btn-sm bulk-select-btn" onclick="dashboard.selectAllByType('online')">Select All Online</button>
+            </div>
+            <div class="bulk-toolbar-right">
+                <button class="btn btn-danger btn-sm" onclick="dashboard.showBulkRebootModal()">🔄 Reboot Selected</button>
+                <button class="btn btn-sm" onclick="dashboard.clearSelection()">✕ Clear</button>
+            </div>
+        </div>
+
         <div id="loading" class="loading">
             <div class="spinner"></div>
             <p>Loading devices...</p>
@@ -108,6 +122,25 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=7"></script>
+    <!-- Bulk Reboot Modal -->
+    <div id="bulkRebootModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Confirm Bulk Reboot</h2>
+                <button class="close-btn">&times;</button>
+            </div>
+            <p>Reboot <strong id="bulkRebootCount">0</strong> selected device(s)?</p>
+            <p style="color: var(--text-secondary); font-size: 14px; margin-top: 6px;">
+                All devices will receive the reboot command simultaneously. Each device will be unavailable for 2–3 minutes.
+            </p>
+            <ul id="bulkRebootDeviceList" class="bulk-device-list"></ul>
+            <div class="modal-actions">
+                <button class="btn close-btn">Cancel</button>
+                <button class="btn btn-danger" id="confirmBulkReboot">🔄 Reboot All Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=8"></script>
 </body>
 </html>

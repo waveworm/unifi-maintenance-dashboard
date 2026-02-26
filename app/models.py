@@ -93,9 +93,39 @@ class AuditLog(Base):
     error_message = Column(Text, nullable=True)
 
 
+class ScheduleTemplate(Base):
+    """Reusable schedule configuration template."""
+
+    __tablename__ = "schedule_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    template_type = Column(String(50), nullable=False)  # "device_reboot" | "port_cycle"
+
+    # Schedule timing
+    frequency = Column(String(50), nullable=False)
+    time_of_day = Column(String(10), nullable=True)
+    day_of_week = Column(Integer, nullable=True)
+    day_of_month = Column(Integer, nullable=True)
+
+    # Device reboot specific
+    rolling_mode = Column(Boolean, nullable=True)
+    delay_between_devices = Column(Integer, nullable=True)
+    max_wait_time = Column(Integer, nullable=True)
+    continue_on_failure = Column(Boolean, nullable=True)
+
+    # Port cycle specific
+    poe_only = Column(Boolean, nullable=True)
+    off_duration = Column(Integer, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class PoESchedule(Base):
     """Scheduled PoE port power cycles."""
-    
+
     __tablename__ = "poe_schedules"
     
     id = Column(Integer, primary_key=True, index=True)
