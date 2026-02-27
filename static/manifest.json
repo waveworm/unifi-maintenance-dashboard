@@ -1,0 +1,31 @@
+{
+  "name": "UniFi Maintenance Dashboard",
+  "short_name": "UniFi Maint",
+  "description": "Manage and schedule UniFi device reboots across all sites",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1923",
+  "theme_color": "#0f1923",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Schedules",
+      "url": "/schedules",
+      "description": "Manage reboot schedules"
+    }
+  ]
+}

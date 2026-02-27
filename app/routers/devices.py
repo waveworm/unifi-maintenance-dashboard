@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 from typing import List
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.unifi_client import UniFiClient
+import app.telegram_notifier as telegram_notifier
 from app.schemas import (
     DeviceInfo,
     PortInfo,
@@ -47,6 +49,35 @@ async def log_audit(
     )
     db.add(audit_log)
     await db.commit()
+
+
+async def _poll_and_notify_online(device_mac: str, device_name: str, site: str, started_at: datetime, timeout: int = 300):
+    """Background task: poll until device comes back online, then send Telegram notification."""
+    try:
+        async with UniFiClient() as client:
+            online = await client.wait_for_device_online(device_mac, timeout=timeout, site=site)
+        duration = int((datetime.utcnow() - started_at).total_seconds())
+        if online:
+            await telegram_notifier.notify_device_back_online(device_name, duration)
+        else:
+            await telegram_notifier.notify_device_reboot_timeout(device_name, timeout)
+    except Exception as e:
+        logger.warning(f"Telegram reboot notification failed for {device_name}: {e}")
+
+
+@router.post("/telegram/test")
+async def test_telegram():
+    """Send a test Telegram message to verify configuration."""
+    from app.config import settings
+    if not settings.telegram_enabled:
+        return {"success": False, "message": "Telegram is disabled (TELEGRAM_ENABLED=false)"}
+    if not settings.telegram_bot_token or not settings.telegram_chat_id:
+        return {"success": False, "message": "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID"}
+    ok = await telegram_notifier.send_message(
+        "✅ <b>UniFi Dashboard</b> — Telegram notifications are working!\n"
+        "🔔 You will receive alerts for scheduled maintenance and manual reboots."
+    )
+    return {"success": ok, "message": "Test message sent" if ok else "Failed to send — check logs"}
 
 
 @router.get("/sites")
@@ -113,26 +144,32 @@ async def reboot_device(
             device = await client.get_device_by_id(request.device_id, request.site)
             if not device:
                 raise HTTPException(status_code=404, detail="Device not found")
-            
+
             device_name = device.get("name", "Unknown")
             device_mac = device.get("mac", request.device_id)
-            
+            started_at = datetime.utcnow()
+
             # Use MAC address for reboot command
             await client.reboot_device(device_mac, request.site)
-            
+
             await log_audit(
                 db, "reboot", device_mac, device_name,
                 user_ip=http_request.client.host
             )
-            
+
+            # Fire background task to notify when device comes back online
+            asyncio.create_task(
+                _poll_and_notify_online(device_mac, device_name, request.site or "", started_at)
+            )
+
             result = {"success": True, "device_id": request.device_id}
-            
+
             if request.wait_for_online:
                 online = await client.wait_for_device_online(device_mac, site=request.site)
                 result["came_back_online"] = online
-            
+
             return result
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -149,6 +186,8 @@ async def bulk_reboot_devices(
     """Reboot multiple devices at once (parallel, fire-and-forget)."""
     rebooted = []
     failed = []
+
+    bulk_started_at = datetime.utcnow()
 
     try:
         async with UniFiClient() as client:
@@ -170,6 +209,11 @@ async def bulk_reboot_devices(
                         details={"bulk": True, "total": len(request.device_ids)}
                     )
                     rebooted.append({"device_id": device_id, "device_name": device_name})
+
+                    # Fire background poll-and-notify for this device
+                    asyncio.create_task(
+                        _poll_and_notify_online(device_mac, device_name, request.site or "", bulk_started_at)
+                    )
 
                 except Exception as e:
                     logger.error(f"Bulk reboot failed for device {device_id}: {e}")

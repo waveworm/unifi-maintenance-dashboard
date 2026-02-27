@@ -12,6 +12,7 @@ from app.database import AsyncSessionLocal
 from app.models import Schedule, JobRun, PoESchedule
 from app.unifi_client import UniFiClient
 from app.config import settings
+import app.telegram_notifier as telegram_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -170,23 +171,36 @@ class SchedulerEngine:
         """Execute reboots one device at a time."""
         logger.info(f"Executing rolling reboots for schedule: {schedule.name}")
 
+        results = []
+
         async with UniFiClient() as client:
             site_name = await self._resolve_schedule_site(schedule, client)
-            
+
+            # Resolve human-readable site display name for notifications
+            site_display = site_name or ""
+            if site_name:
+                try:
+                    sites_list = await client.get_sites()
+                    site_obj = next((s for s in sites_list if s.get("name") == site_name), None)
+                    if site_obj:
+                        site_display = site_obj.get("desc") or site_obj.get("name") or site_name
+                except Exception:
+                    pass
+
             for device_id in schedule.device_ids:
                 # Get device info first to set the name
                 try:
                     device = await client.get_device_by_id(device_id, site_name)
                     if not device:
                         raise Exception(f"Device {device_id} not found")
-                    
+
                     device_name = device.get("name", "Unknown")
                     device_mac = device.get("mac", device_id)
                 except Exception as e:
                     logger.error(f"Failed to get device info for {device_id}: {e}")
                     device_name = device_id
                     device_mac = device_id
-                
+
                 # Create job run with device name
                 job_run = JobRun(
                     schedule_id=schedule.id,
@@ -199,47 +213,63 @@ class SchedulerEngine:
                 db.add(job_run)
                 await db.commit()
                 await db.refresh(job_run)
-                
+
                 try:
                     # Reboot device
                     logger.info(f"Rebooting device: {device_name} ({device_mac})")
                     await client.reboot_device(device_mac, site_name)
-                    
+
                     # Mark job as completed immediately after reboot command
                     job_run.status = "completed"
                     job_run.completed_at = datetime.utcnow()
                     job_run.duration_seconds = int((job_run.completed_at - job_run.started_at).total_seconds())
                     await db.commit()
-                    
+
+                    results.append({
+                        "device_name": device_name,
+                        "status": "completed",
+                        "duration_seconds": job_run.duration_seconds,
+                        "error_message": None,
+                    })
+
                     # Wait for device to come back online if configured (after marking complete)
                     if schedule.max_wait_time > 0:
                         logger.info(f"Waiting for {device_name} to come back online (max {schedule.max_wait_time}s)")
                         await asyncio.sleep(10)  # Initial wait for reboot to start
-                        
+
                         online = await client.wait_for_device_online(
                             device_mac,
                             timeout=schedule.max_wait_time - 10,
                             site=site_name
                         )
-                        
+
                         if not online:
                             logger.warning(f"Device {device_name} did not come back online within {schedule.max_wait_time}s")
-                    
+
                     # Delay before next device
                     if schedule.delay_between_devices > 0:
                         logger.info(f"Waiting {schedule.delay_between_devices}s before next device")
                         await asyncio.sleep(schedule.delay_between_devices)
-                    
+
                 except Exception as e:
                     logger.error(f"Failed to reboot device {device_id}: {e}")
                     job_run.status = "failed"
                     job_run.error_message = str(e)
                     job_run.completed_at = datetime.utcnow()
                     await db.commit()
-                    
+
+                    results.append({
+                        "device_name": device_name,
+                        "status": "failed",
+                        "duration_seconds": None,
+                        "error_message": str(e),
+                    })
+
                     if not schedule.continue_on_failure:
                         logger.error("Stopping rolling reboot due to failure")
                         break
+
+        await telegram_notifier.notify_schedule_complete(schedule.name, site_display, results)
     
     async def _execute_parallel_reboots(self, schedule: Schedule, db: AsyncSession):
         """Execute reboots for all devices in parallel."""
@@ -247,29 +277,49 @@ class SchedulerEngine:
 
         async with UniFiClient() as client:
             site_name = await self._resolve_schedule_site(schedule, client)
-        
-        tasks = []
-        for device_id in schedule.device_ids:
-            tasks.append(self._reboot_single_device(schedule.id, device_id, db, site_name))
-        
-        await asyncio.gather(*tasks, return_exceptions=True)
-    
-    async def _reboot_single_device(self, schedule_id: int, device_id: str, db: AsyncSession, site_name: str = None):
-        """Reboot a single device and log the job."""
+            # Resolve human-readable site display name for notifications
+            site_display = site_name or ""
+            if site_name:
+                try:
+                    sites_list = await client.get_sites()
+                    site_obj = next((s for s in sites_list if s.get("name") == site_name), None)
+                    if site_obj:
+                        site_display = site_obj.get("desc") or site_obj.get("name") or site_name
+                except Exception:
+                    pass
+
+        tasks = [self._reboot_single_device(schedule.id, device_id, db, site_name)
+                 for device_id in schedule.device_ids]
+
+        task_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Collect results (exceptions become failed entries)
+        results = []
+        for r in task_results:
+            if isinstance(r, dict):
+                results.append(r)
+            elif isinstance(r, Exception):
+                results.append({"device_name": "Unknown", "status": "failed",
+                                 "duration_seconds": None, "error_message": str(r)})
+
+        await telegram_notifier.notify_schedule_complete(schedule.name, site_display, results)
+
+    async def _reboot_single_device(self, schedule_id: int, device_id: str, db: AsyncSession, site_name: str = None) -> dict:
+        """Reboot a single device and log the job. Returns a result dict."""
+        device_name = device_id
+        device_mac = device_id
         try:
             async with UniFiClient() as client:
                 # Get device info first
                 device = await client.get_device_by_id(device_id, site_name)
                 if not device:
                     raise Exception(f"Device {device_id} not found")
-                
+
                 device_name = device.get("name", "Unknown")
                 device_mac = device.get("mac", device_id)
         except Exception as e:
             logger.error(f"Failed to get device info for {device_id}: {e}")
-            device_name = device_id
-            device_mac = device_id
-        
+
         # Create job run with device name
         job_run = JobRun(
             schedule_id=schedule_id,
@@ -282,22 +332,36 @@ class SchedulerEngine:
         db.add(job_run)
         await db.commit()
         await db.refresh(job_run)
-        
+
         try:
             async with UniFiClient() as client:
                 await client.reboot_device(device_mac, site_name)
-                
+
                 job_run.status = "completed"
                 job_run.completed_at = datetime.utcnow()
                 job_run.duration_seconds = int((job_run.completed_at - job_run.started_at).total_seconds())
-                
+                await db.commit()
+
+                return {
+                    "device_name": device_name,
+                    "status": "completed",
+                    "duration_seconds": job_run.duration_seconds,
+                    "error_message": None,
+                }
+
         except Exception as e:
             logger.error(f"Failed to reboot device {device_id}: {e}")
             job_run.status = "failed"
             job_run.error_message = str(e)
             job_run.completed_at = datetime.utcnow()
-        
-        await db.commit()
+            await db.commit()
+
+            return {
+                "device_name": device_name,
+                "status": "failed",
+                "duration_seconds": None,
+                "error_message": str(e),
+            }
 
     async def _resolve_schedule_site(self, schedule: Schedule, client: UniFiClient) -> Optional[str]:
         """Resolve site quickly, preferring stored schedule.site_name."""

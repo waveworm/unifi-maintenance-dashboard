@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     
     # PoE Power Cycle
     poe_power_off_duration: int = Field(default=15, description="PoE power off duration (seconds)")
+
+    # Telegram Notifications
+    telegram_enabled: bool = Field(default=False, description="Enable Telegram notifications")
+    telegram_bot_token: Optional[str] = Field(default=None, description="Telegram bot token from BotFather")
+    telegram_chat_id: Optional[str] = Field(default=None, description="Telegram chat ID")
     
     @validator("unifi_base_url")
     def validate_unifi_url(cls, v):
