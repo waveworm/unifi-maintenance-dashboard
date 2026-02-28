@@ -4,6 +4,63 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class SiteInventory(Base):
+    """Business-level site metadata for a managed property."""
+
+    __tablename__ = "sites_inventory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    unifi_site_name = Column(String(255), nullable=False, unique=True, index=True)
+    client_name = Column(String(255), nullable=True)
+    property_type = Column(String(100), nullable=True)
+    address = Column(Text, nullable=True)
+    timezone = Column(String(100), nullable=True)
+    maintenance_window = Column(String(255), nullable=True)
+    service_tier = Column(String(100), nullable=True)
+    priority = Column(Integer, default=3)
+    tags = Column(JSON, nullable=True)
+    notes = Column(Text, nullable=True)
+    internal_notes = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    managed_assets = relationship(
+        "ManagedAsset",
+        back_populates="site_inventory",
+        cascade="all, delete-orphan",
+    )
+
+
+class ManagedAsset(Base):
+    """Critical device or port metadata tracked outside UniFi's native inventory."""
+
+    __tablename__ = "managed_assets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    site_inventory_id = Column(Integer, ForeignKey("sites_inventory.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    asset_type = Column(String(100), nullable=False, index=True)
+    device_id = Column(String(255), nullable=True, index=True)
+    device_name = Column(String(255), nullable=True)
+    port_idx = Column(Integer, nullable=True)
+    port_label = Column(String(255), nullable=True)
+    vendor = Column(String(255), nullable=True)
+    model = Column(String(255), nullable=True)
+    serial_number = Column(String(255), nullable=True)
+    location_details = Column(Text, nullable=True)
+    recovery_playbook = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    tags = Column(JSON, nullable=True)
+    auto_cycle_policy = Column(String(50), default="manual_approval_required", nullable=False)
+    is_enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    site_inventory = relationship("SiteInventory", back_populates="managed_assets")
+
+
 class Schedule(Base):
     """Scheduled maintenance job configuration."""
     

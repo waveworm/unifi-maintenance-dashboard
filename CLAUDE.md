@@ -1,7 +1,7 @@
 # UniFi Maintenance Dashboard - Development Notes
 
 ## Project Overview
-Self-hosted UniFi device maintenance dashboard for managing network devices across 102 sites.
+Self-hosted UniFi device maintenance dashboard for managing network devices across roughly 130 sites.
 
 ## Current Status: Production — All Phases Complete
 
@@ -29,6 +29,14 @@ Self-hosted UniFi device maintenance dashboard for managing network devices acro
 - Site selector dropdown (102 sites)
 - All API endpoints support optional site parameter
 - Switch between sites dynamically
+
+#### MSP Inventory Layer
+- Business-level `site_inventory` records for managed properties
+- `managed_assets` registry for critical devices and ports that UniFi alone does not describe well
+- CRUD API for site records (client, maintenance window, service tier, tags, notes)
+- CRUD API for managed assets (asset type, device/port mapping, recovery playbook, automation policy)
+- Dedicated `/inventory` UI with separate Sites and Assets views
+- One-click import action to seed site records from existing UniFi sites
 
 #### Phase 3: Scheduler System
 - **Job Execution Engine** (`scheduler_engine.py`)
@@ -61,6 +69,11 @@ Self-hosted UniFi device maintenance dashboard for managing network devices acro
 - **Whitlock Mills** (`d30qi0tf`): 19 daily port cycle schedules, 3:00 AM–6:00 AM, 10 min apart
 - **Whitlock2** (`1z02qot5`): 19 daily port cycle schedules, 3:00 AM–6:00 AM, 10 min apart
 
+#### Inventory Seed Status
+- `sites_inventory` has been seeded from the UniFi controller
+- Current imported site records: **102**
+- `managed_assets` is ready for manual population through the new Inventory UI
+
 ### 🚧 Known Issues
 
 #### Site Selector Not Loading (Minor)
@@ -73,6 +86,73 @@ Self-hosted UniFi device maintenance dashboard for managing network devices acro
 - Retry logic for failed operations
 - Rate limiting
 - Backup/restore procedures
+
+## Business-Focused Improvement Roadmap
+
+The current app is good at executing reboots and port cycles, but it still behaves like a device utility. For an MSP managing many apartment complexes, the next round of work should make it operate more like an operations system.
+
+### 1. Site Operations Layer
+- Add a `sites_inventory` table for business metadata that UniFi does not track well
+- Store: property name, address, timezone, client/company, maintenance window, notes, priority, and service tier
+- Add per-site tags such as `laundry`, `cameras`, `wifi`, `critical`, `after-hours-only`
+- Surface a site summary page so the dashboard becomes a portfolio view, not just a controller view
+
+### 2. Critical Device + Port Registry
+- Add a `managed_assets` table tied to site + UniFi device + optional switch port
+- Track what each port powers: laundry controller, camera switch, ISP handoff, gate controller, AP uplink, etc.
+- Add a `recovery_playbook` / notes field so you know the safe reboot order before touching a critical device
+- Flag ports/devices as `safe_to_auto_cycle`, `manual_approval_required`, or `never_touch`
+- This directly helps with the "mystery PoE devices" problem that is hard to remember across many properties
+
+### 3. Schedule Templates at Scale
+- The code already has `schedule_templates`, but it is only a basic CRUD layer today
+- Expand this into reusable maintenance packs: "Laundry Controller Power Cycle", "Camera Switch Reboot", "Weekly AP Rolling Reboot"
+- Add bulk apply to selected sites so one template can create schedules across dozens of properties
+- Add cloning by site profile so similar apartment complexes can inherit the same schedule set
+- Add schedule blackout windows for holidays, leasing office hours, or known tenant peak times
+
+### 4. Safer Automation for MSP Use
+- Add pre-checks before any reboot/port cycle: device online state, last seen age, switch model, port PoE capability
+- Add dependency awareness so the app warns before rebooting an uplink switch or a port feeding multiple downstream devices
+- Add "run now" with staged queueing and controller-side rate limiting instead of launching too many operations at once
+- Add maintenance confirmations for high-risk assets
+- Add a dry-run mode that shows exactly what will happen before a large batch executes
+
+### 5. Monitoring + Follow-Up
+- Add stale/offline alerts for devices that have been offline beyond a threshold
+- Add "last successful power cycle" and "repeat failure count" metrics per device/port
+- Add recurring exception reports: failed schedules, devices that did not return online, sites with repeated interventions
+- Add per-site weekly summary output so you can see which properties are generating the most operational noise
+- Telegram is already wired in, so this should build on existing notification plumbing
+
+### 6. MSP Workflow Features
+- Add client-facing notes and internal-only notes
+- Add service ticket / work order reference fields on manual actions
+- Add "why this was rebooted" reason capture for auditability
+- Add quick filters: "all laundry devices", "all camera uplinks", "all sites with failed jobs this week"
+- Add CSV export for schedules, job history, and managed asset inventory
+
+### 7. Security and Access Control
+- Add dashboard authentication before expanding operational use
+- Add role separation: read-only, operator, admin
+- Add approval or second-confirmation flows for critical ports and bulk jobs
+- Add an audit trail that records who triggered each action and why
+
+## Code Review Notes From This Pass
+
+### Operational Gaps
+- The app stores schedules and job history, but it does not persist site business context (client, property notes, critical assets, service windows)
+- There is no local inventory layer for non-obvious PoE-powered devices, which is the main pain point for laundry and similar edge equipment
+- Bulk execution exists, but there is no global queue or concurrency policy for heavy multi-site usage
+
+### Code Risks To Address
+- `JobRun.status` usage is inconsistent: some paths write `completed`, others write `success`, while the model comment lists `pending`, `running`, `success`, `failed`, `timeout`
+- Scheduler reload currently removes and rebuilds all jobs on every schedule change; this is simple, but it will get less efficient as schedule count grows
+- The app still has no dashboard authentication, which becomes a serious risk once more client and site metadata is added
+
+### Documentation Hygiene
+- The example environment block in this file should never contain a live password
+- Credentials below are now intentionally redacted
 
 ## Technical Stack
 
@@ -91,7 +171,7 @@ Self-hosted UniFi device maintenance dashboard for managing network devices acro
 
 ### Database
 - SQLite with async support
-- Tables: schedules, job_runs, audit_logs, poe_schedules
+- Tables: sites_inventory, managed_assets, schedules, job_runs, audit_logs, poe_schedules
 
 ## Configuration
 
@@ -99,7 +179,7 @@ Self-hosted UniFi device maintenance dashboard for managing network devices acro
 ```
 UNIFI_BASE_URL=https://10.91.0.10:8443
 UNIFI_USERNAME=unifiAPI
-UNIFI_PASSWORD=*ZoEegqNY2ryj9Xwu
+UNIFI_PASSWORD=REDACTED
 UNIFI_SITE=default
 UNIFI_VERIFY_SSL=false
 APP_HOST=0.0.0.0
@@ -118,6 +198,19 @@ DATABASE_URL=sqlite+aiosqlite:///./data/unifi_dashboard.db
 - `POST /api/devices/poe/control` - Control PoE mode
 - `POST /api/devices/poe/power-cycle` - Power cycle PoE port
 - `POST /api/devices/port/cycle` - Cycle port (PoE or full)
+
+### Inventory
+- `GET /api/site-inventory` - List managed site records
+- `POST /api/site-inventory` - Create managed site record
+- `POST /api/site-inventory/import-unifi-sites` - Import missing site records from UniFi
+- `GET /api/site-inventory/{id}` - Get managed site record
+- `PUT /api/site-inventory/{id}` - Update managed site record
+- `DELETE /api/site-inventory/{id}` - Delete managed site record (blocked if assets exist)
+- `GET /api/managed-assets` - List managed assets
+- `POST /api/managed-assets` - Create managed asset
+- `GET /api/managed-assets/{id}` - Get managed asset
+- `PUT /api/managed-assets/{id}` - Update managed asset
+- `DELETE /api/managed-assets/{id}` - Delete managed asset
 
 ### Scheduler
 - `GET /api/schedules` - List device reboot schedules
@@ -141,22 +234,26 @@ DATABASE_URL=sqlite+aiosqlite:///./data/unifi_dashboard.db
 │   ├── main.py                 # FastAPI app
 │   ├── config.py               # Settings & validation
 │   ├── database.py             # SQLAlchemy setup
-│   ├── models.py               # Database models (Schedule, JobRun, AuditLog, PoESchedule)
+│   ├── models.py               # Database models (SiteInventory, ManagedAsset, Schedule, JobRun, AuditLog, PoESchedule)
 │   ├── schemas.py              # Pydantic schemas
 │   ├── logging_config.py       # Logging setup
 │   ├── scheduler_engine.py     # APScheduler job execution engine
 │   ├── unifi_client.py         # UniFi API client (port cycling, PoE, reboots)
 │   └── routers/
 │       ├── __init__.py
+│       ├── inventory.py        # Site inventory + managed asset API
 │       ├── devices.py          # Device endpoints + manual cycle job logging
 │       └── scheduler.py        # Scheduler endpoints + job history
 ├── static/
 │   ├── style.css               # Dashboard styles + port cycle timer CSS
 │   ├── app.js                  # Dashboard JavaScript (device cards, port control, timer)
+│   ├── inventory.css           # Inventory page styles
+│   ├── inventory.js            # Inventory UI logic
 │   ├── schedules.css           # Schedules page styles + grouped card CSS
 │   └── schedules.js            # Schedules page JS (grouped schedules, job history display)
 ├── templates/
 │   ├── dashboard.html          # Main dashboard template
+│   ├── inventory.html          # MSP inventory template
 │   └── schedules.html          # Schedules management template
 ├── data/                       # SQLite database
 ├── logs/                       # Application logs
@@ -219,6 +316,13 @@ tailscale serve --bg http://127.0.0.1:8000   # start proxy
 tailscale serve --https=443 off      # stop proxy
 ```
 
+## Recommended Build Order
+
+1. Add site inventory + managed asset registry first. This solves the biggest operational memory problem across many properties.
+2. Expand schedule templates into bulk rollout tooling. This saves the most time once site metadata exists.
+3. Add alerting, queueing, and safety controls. This reduces mistakes as automation volume grows.
+4. Add authentication and role controls before exposing more client/business data in the dashboard.
+
 ### Access Points
 - **Dashboard (Tailscale)**: https://unifirebootmanager.tail7e0d.ts.net/
 - **Dashboard (localhost)**: http://127.0.0.1:8000
@@ -251,6 +355,7 @@ tailscale serve --https=443 off      # stop proxy
 - Consider adding WebSocket support for real-time device status
 - Rolling reboots should wait for each device to come back online before proceeding
 - Job history should be retained for audit purposes
+- Extend the inventory layer into UI pages and schedule pre-checks before using it operationally
 
 ---
 

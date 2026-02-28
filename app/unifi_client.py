@@ -501,6 +501,81 @@ class UniFiClient:
         """
         return await self.cycle_port(device_id, port_idx, off_duration, site, poe_only=True)
     
+    async def get_clients(self, site: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all currently connected WiFi clients on a site."""
+        await self.connect()
+        target_site = site or self.site
+        url = f"{self.base_url}/api/s/{target_site}/stat/sta"
+        response = await self._client.get(url, cookies=self._cookies)
+        if response.status_code != 200:
+            logger.error(f"Failed to get clients: {response.status_code} - {response.text}")
+            raise Exception(f"Failed to get clients: {response.status_code}")
+        data = response.json()
+        clients = data.get("data", [])
+        logger.info(f"Retrieved {len(clients)} connected clients from site '{target_site}'")
+        return clients
+
+    async def get_blocked_clients(self, site: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get all blocked clients (known users with blocked=true) on a site."""
+        await self.connect()
+        target_site = site or self.site
+        url = f"{self.base_url}/api/s/{target_site}/rest/user"
+        response = await self._client.get(url, cookies=self._cookies)
+        if response.status_code != 200:
+            logger.error(f"Failed to get blocked clients: {response.status_code} - {response.text}")
+            raise Exception(f"Failed to get blocked clients: {response.status_code}")
+        data = response.json()
+        all_users = data.get("data", [])
+        blocked = [u for u in all_users if u.get("blocked") is True]
+        logger.info(f"Found {len(blocked)} blocked clients on site '{target_site}'")
+        return blocked
+
+    async def block_client(self, mac: str, site: Optional[str] = None) -> Dict[str, Any]:
+        """Block a WiFi client by MAC address."""
+        await self.connect()
+        target_site = site or self.site
+        url = f"{self.base_url}/api/s/{target_site}/cmd/stamgr"
+        payload = {"cmd": "block-sta", "mac": mac}
+        response = await self._client.post(url, json=payload, cookies=self._cookies)
+        if response.status_code != 200:
+            logger.error(f"Failed to block client {mac}: {response.status_code} - {response.text}")
+            raise Exception(f"Failed to block client: {response.status_code}")
+        logger.info(f"Blocked client {mac} on site '{target_site}'")
+        return response.json()
+
+    async def unblock_client(self, mac: str, site: Optional[str] = None) -> Dict[str, Any]:
+        """Unblock a WiFi client by MAC address."""
+        await self.connect()
+        target_site = site or self.site
+        url = f"{self.base_url}/api/s/{target_site}/cmd/stamgr"
+        payload = {"cmd": "unblock-sta", "mac": mac}
+        response = await self._client.post(url, json=payload, cookies=self._cookies)
+        if response.status_code != 200:
+            logger.error(f"Failed to unblock client {mac}: {response.status_code} - {response.text}")
+            raise Exception(f"Failed to unblock client: {response.status_code}")
+        logger.info(f"Unblocked client {mac} on site '{target_site}'")
+        return response.json()
+
+    def format_client_info(self, client: Dict[str, Any]) -> Dict[str, Any]:
+        """Format connected client data for API response."""
+        signal = client.get("signal", None)
+        rssi = client.get("rssi", None)
+        return {
+            "mac": client.get("mac", ""),
+            "hostname": client.get("hostname") or client.get("name") or client.get("mac", "Unknown"),
+            "ip": client.get("ip", ""),
+            "essid": client.get("essid", ""),
+            "ap_mac": client.get("ap_mac", ""),
+            "signal": signal,
+            "rssi": rssi,
+            "tx_bytes": client.get("tx_bytes", 0),
+            "rx_bytes": client.get("rx_bytes", 0),
+            "uptime": client.get("uptime", 0),
+            "is_wired": client.get("is_wired", False),
+            "blocked": client.get("blocked", False),
+            "oui": client.get("oui", ""),
+        }
+
     async def wait_for_device_online(self, device_id: str, timeout: int = 300, poll_interval: int = 10, site: Optional[str] = None) -> bool:
         """
         Wait for a device to come back online after reboot.

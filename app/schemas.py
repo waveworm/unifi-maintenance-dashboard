@@ -66,6 +66,141 @@ class PortCycleRequest(BaseModel):
     site: Optional[str] = Field(default=None, description="Site name (optional)")
 
 
+class SiteInventoryCreate(BaseModel):
+    """Create a business-level site record."""
+    name: str = Field(..., min_length=1, max_length=255)
+    unifi_site_name: str = Field(..., min_length=1, max_length=255)
+    client_name: Optional[str] = Field(default=None, max_length=255)
+    property_type: Optional[str] = Field(default=None, max_length=100)
+    address: Optional[str] = None
+    timezone: Optional[str] = Field(default=None, max_length=100)
+    maintenance_window: Optional[str] = Field(default=None, max_length=255)
+    service_tier: Optional[str] = Field(default=None, max_length=100)
+    priority: int = Field(default=3, ge=1, le=5)
+    tags: List[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+    internal_notes: Optional[str] = None
+    is_active: bool = True
+
+
+class SiteInventoryUpdate(BaseModel):
+    """Update a business-level site record."""
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    unifi_site_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    client_name: Optional[str] = Field(default=None, max_length=255)
+    property_type: Optional[str] = Field(default=None, max_length=100)
+    address: Optional[str] = None
+    timezone: Optional[str] = Field(default=None, max_length=100)
+    maintenance_window: Optional[str] = Field(default=None, max_length=255)
+    service_tier: Optional[str] = Field(default=None, max_length=100)
+    priority: Optional[int] = Field(default=None, ge=1, le=5)
+    tags: Optional[List[str]] = None
+    notes: Optional[str] = None
+    internal_notes: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class SiteInventoryResponse(BaseModel):
+    """Site inventory response schema."""
+    id: int
+    name: str
+    unifi_site_name: str
+    client_name: Optional[str]
+    property_type: Optional[str]
+    address: Optional[str]
+    timezone: Optional[str]
+    maintenance_window: Optional[str]
+    service_tier: Optional[str]
+    priority: int
+    tags: List[str] = Field(default_factory=list)
+    notes: Optional[str]
+    internal_notes: Optional[str]
+    is_active: bool
+    asset_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
+
+
+class ManagedAssetCreate(BaseModel):
+    """Create a tracked managed asset."""
+    site_inventory_id: int = Field(..., ge=1)
+    name: str = Field(..., min_length=1, max_length=255)
+    asset_type: str = Field(..., min_length=1, max_length=100)
+    device_id: Optional[str] = Field(default=None, max_length=255)
+    device_name: Optional[str] = Field(default=None, max_length=255)
+    port_idx: Optional[int] = Field(default=None, ge=1)
+    port_label: Optional[str] = Field(default=None, max_length=255)
+    vendor: Optional[str] = Field(default=None, max_length=255)
+    model: Optional[str] = Field(default=None, max_length=255)
+    serial_number: Optional[str] = Field(default=None, max_length=255)
+    location_details: Optional[str] = None
+    recovery_playbook: Optional[str] = None
+    notes: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    auto_cycle_policy: str = Field(
+        default="manual_approval_required",
+        description="safe_to_auto_cycle, manual_approval_required, or never_touch",
+    )
+    is_enabled: bool = True
+
+
+class ManagedAssetUpdate(BaseModel):
+    """Update a tracked managed asset."""
+    site_inventory_id: Optional[int] = Field(default=None, ge=1)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    asset_type: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    device_id: Optional[str] = Field(default=None, max_length=255)
+    device_name: Optional[str] = Field(default=None, max_length=255)
+    port_idx: Optional[int] = Field(default=None, ge=1)
+    port_label: Optional[str] = Field(default=None, max_length=255)
+    vendor: Optional[str] = Field(default=None, max_length=255)
+    model: Optional[str] = Field(default=None, max_length=255)
+    serial_number: Optional[str] = Field(default=None, max_length=255)
+    location_details: Optional[str] = None
+    recovery_playbook: Optional[str] = None
+    notes: Optional[str] = None
+    tags: Optional[List[str]] = None
+    auto_cycle_policy: Optional[str] = None
+    is_enabled: Optional[bool] = None
+
+
+class ManagedAssetResponse(BaseModel):
+    """Managed asset response schema."""
+    id: int
+    site_inventory_id: int
+    site_name: Optional[str] = None
+    unifi_site_name: Optional[str] = None
+    name: str
+    asset_type: str
+    device_id: Optional[str]
+    device_name: Optional[str]
+    port_idx: Optional[int]
+    port_label: Optional[str]
+    vendor: Optional[str]
+    model: Optional[str]
+    serial_number: Optional[str]
+    location_details: Optional[str]
+    recovery_playbook: Optional[str]
+    notes: Optional[str]
+    tags: List[str] = Field(default_factory=list)
+    auto_cycle_policy: str
+    is_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
+
+
 class ScheduleCreate(BaseModel):
     """Create a new maintenance schedule."""
     name: str = Field(..., min_length=1, max_length=255)
@@ -219,6 +354,35 @@ class PoEScheduleResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ClientInfo(BaseModel):
+    """Connected WiFi client information."""
+    mac: str
+    hostname: str
+    ip: str
+    essid: str
+    ap_mac: str
+    signal: Optional[int] = None
+    rssi: Optional[int] = None
+    tx_bytes: int = 0
+    rx_bytes: int = 0
+    uptime: int = 0
+    is_wired: bool = False
+    blocked: bool = False
+    oui: str = ""
+
+
+class ClientActionRequest(BaseModel):
+    """Block or unblock a single client."""
+    mac: str = Field(..., description="Client MAC address")
+    site: Optional[str] = Field(default=None, description="Site name (optional)")
+
+
+class BulkClientActionRequest(BaseModel):
+    """Block multiple clients at once."""
+    macs: List[str] = Field(..., min_length=1)
+    site: Optional[str] = Field(default=None, description="Site name (optional)")
 
 
 class BulkRebootRequest(BaseModel):

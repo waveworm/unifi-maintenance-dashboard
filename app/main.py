@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import validate_configuration, ensure_directories
 from app.logging_config import setup_logging
 from app.database import init_db
-from app.routers import devices, scheduler
+from app.routers import devices, scheduler, clients, inventory
 from app.scheduler_engine import scheduler_engine
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ async def disable_cache_in_dev(request: Request, call_next):
 
     if settings.development_mode and (
         request.url.path.startswith("/static/")
-        or request.url.path in {"/", "/schedules"}
+        or request.url.path in {"/", "/schedules", "/clients", "/inventory"}
     ):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -84,6 +84,8 @@ if settings.development_mode:
 # Include routers
 app.include_router(devices.router, prefix="/api", tags=["devices"])
 app.include_router(scheduler.router, prefix="/api", tags=["scheduler"])
+app.include_router(clients.router, prefix="/api", tags=["clients"])
+app.include_router(inventory.router, prefix="/api", tags=["inventory"])
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -108,6 +110,18 @@ async def schedules_page(request: Request):
             "scheduler_timezone": settings.app_timezone,
         },
     )
+
+
+@app.get("/clients", response_class=HTMLResponse)
+async def clients_page(request: Request):
+    """Render the client blocking page."""
+    return templates.TemplateResponse("clients.html", {"request": request})
+
+
+@app.get("/inventory", response_class=HTMLResponse)
+async def inventory_page(request: Request):
+    """Render the MSP inventory page."""
+    return templates.TemplateResponse("inventory.html", {"request": request})
 
 
 @app.get("/health")

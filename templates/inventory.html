@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MSP Inventory - UniFi Maintenance Dashboard</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0f1923">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/schedules.css">
+    <link rel="stylesheet" href="/static/inventory.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🗂️ MSP Inventory</h1>
+            <nav class="header-nav">
+                <a href="/" class="nav-link">🏠 Dashboard</a>
+                <a href="/schedules" class="nav-link">📅 Schedules</a>
+                <a href="/inventory" class="nav-link active">🗂️ Inventory</a>
+                <a href="/clients" class="nav-link">📶 Clients</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        <div id="inventoryAlerts"></div>
+
+        <div class="page-header inventory-page-header">
+            <div>
+                <h2>Site Operations Inventory</h2>
+                <p class="page-subtitle">Track each property, the devices behind critical ports, and what is safe to automate.</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn" id="importSitesBtn">⇅ Import UniFi Sites</button>
+                <button class="btn btn-primary" id="newSiteBtn">+ New Site</button>
+                <button class="btn btn-primary" id="newAssetBtn">+ New Asset</button>
+            </div>
+        </div>
+
+        <section class="inventory-stats">
+            <div class="inventory-stat-card">
+                <div class="inventory-stat-value" id="statSites">0</div>
+                <div class="inventory-stat-label">Tracked Sites</div>
+            </div>
+            <div class="inventory-stat-card">
+                <div class="inventory-stat-value" id="statActiveSites">0</div>
+                <div class="inventory-stat-label">Active Sites</div>
+            </div>
+            <div class="inventory-stat-card">
+                <div class="inventory-stat-value" id="statAssets">0</div>
+                <div class="inventory-stat-label">Managed Assets</div>
+            </div>
+            <div class="inventory-stat-card">
+                <div class="inventory-stat-value" id="statAutoSafe">0</div>
+                <div class="inventory-stat-label">Auto-Safe Assets</div>
+            </div>
+        </section>
+
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="site-tab">Sites</button>
+            <button class="tab-btn" data-tab="asset-tab">Assets</button>
+        </div>
+
+        <section id="site-tab" class="tab-content active">
+            <div class="inventory-toolbar">
+                <div class="inventory-toolbar-group">
+                    <input type="text" id="siteSearchInput" class="inventory-input" placeholder="Search site, client, tag, or UniFi site name...">
+                    <select id="clientFilter" class="inventory-input inventory-select">
+                        <option value="">All Clients</option>
+                    </select>
+                    <select id="siteStatusFilter" class="inventory-input inventory-select">
+                        <option value="">All Statuses</option>
+                        <option value="active">Active Only</option>
+                        <option value="inactive">Inactive Only</option>
+                    </select>
+                </div>
+            </div>
+            <div id="sitesList" class="inventory-grid">
+                <div class="empty-state">Loading site inventory...</div>
+            </div>
+        </section>
+
+        <section id="asset-tab" class="tab-content">
+            <div class="inventory-toolbar">
+                <div class="inventory-toolbar-group">
+                    <input type="text" id="assetSearchInput" class="inventory-input" placeholder="Search asset, device ID, port, site, or notes...">
+                    <select id="assetSiteFilter" class="inventory-input inventory-select">
+                        <option value="">All Sites</option>
+                    </select>
+                    <select id="assetTypeFilter" class="inventory-input inventory-select">
+                        <option value="">All Asset Types</option>
+                    </select>
+                    <select id="assetPolicyFilter" class="inventory-input inventory-select">
+                        <option value="">All Policies</option>
+                        <option value="safe_to_auto_cycle">Safe To Auto Cycle</option>
+                        <option value="manual_approval_required">Manual Approval Required</option>
+                        <option value="never_touch">Never Touch</option>
+                    </select>
+                </div>
+            </div>
+            <div id="assetsList" class="inventory-grid inventory-grid-assets">
+                <div class="empty-state">Loading managed assets...</div>
+            </div>
+        </section>
+    </main>
+
+    <div id="siteModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="siteModalTitle">New Site Record</h3>
+                <button class="close-btn">&times;</button>
+            </div>
+            <form id="siteForm">
+                <input type="hidden" name="site_id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Display Name *</label>
+                        <input type="text" name="name" required placeholder="e.g., Whitlock Mills">
+                    </div>
+                    <div class="form-group">
+                        <label>UniFi Site Name *</label>
+                        <input type="text" name="unifi_site_name" required placeholder="e.g., d30qi0tf">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Client Name</label>
+                        <input type="text" name="client_name" placeholder="Property owner or management company">
+                    </div>
+                    <div class="form-group">
+                        <label>Property Type</label>
+                        <input type="text" name="property_type" placeholder="Apartment, condo, retail, etc.">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Timezone</label>
+                        <input type="text" name="timezone" placeholder="America/New_York">
+                    </div>
+                    <div class="form-group">
+                        <label>Maintenance Window</label>
+                        <input type="text" name="maintenance_window" placeholder="03:00-05:00 local">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Service Tier</label>
+                        <input type="text" name="service_tier" placeholder="Standard, Priority, Premium">
+                    </div>
+                    <div class="form-group">
+                        <label>Priority (1-5)</label>
+                        <input type="number" name="priority" min="1" max="5" value="3">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Tags</label>
+                    <input type="text" name="tags" placeholder="laundry, cameras, wifi, after-hours-only">
+                </div>
+
+                <div class="form-group">
+                    <label>Address</label>
+                    <textarea name="address" rows="2" placeholder="Street address or location notes"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Client-Facing Notes</label>
+                    <textarea name="notes" rows="2" placeholder="High-level summary or support notes"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Internal Notes</label>
+                    <textarea name="internal_notes" rows="3" placeholder="Rack locations, contacts, warning notes, etc."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="is_active" checked>
+                        Site is active
+                    </label>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn close-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="saveSiteBtn">Save Site</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="assetModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="assetModalTitle">New Managed Asset</h3>
+                <button class="close-btn">&times;</button>
+            </div>
+            <form id="assetForm">
+                <input type="hidden" name="asset_id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Site *</label>
+                        <select name="site_inventory_id" id="assetSiteSelect" required>
+                            <option value="">Select site...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Asset Name *</label>
+                        <input type="text" name="name" required placeholder="Laundry controller outlet">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Asset Type *</label>
+                        <input type="text" name="asset_type" required placeholder="laundry_controller, camera_switch, uplink">
+                    </div>
+                    <div class="form-group">
+                        <label>Automation Policy *</label>
+                        <select name="auto_cycle_policy" required>
+                            <option value="manual_approval_required">Manual Approval Required</option>
+                            <option value="safe_to_auto_cycle">Safe To Auto Cycle</option>
+                            <option value="never_touch">Never Touch</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>UniFi Device ID</label>
+                        <input type="text" name="device_id" placeholder="Switch _id or MAC">
+                    </div>
+                    <div class="form-group">
+                        <label>Device Name</label>
+                        <input type="text" name="device_name" placeholder="USW-Laundry-Closet">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Port Number</label>
+                        <input type="number" name="port_idx" min="1" placeholder="12">
+                    </div>
+                    <div class="form-group">
+                        <label>Port Label</label>
+                        <input type="text" name="port_label" placeholder="Laundry controller">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Vendor</label>
+                        <input type="text" name="vendor" placeholder="Alliance, UniFi, Verkada">
+                    </div>
+                    <div class="form-group">
+                        <label>Model</label>
+                        <input type="text" name="model" placeholder="Model or SKU">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Serial Number</label>
+                        <input type="text" name="serial_number" placeholder="Optional">
+                    </div>
+                    <div class="form-group">
+                        <label>Tags</label>
+                        <input type="text" name="tags" placeholder="laundry, critical, poe">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Location Details</label>
+                    <textarea name="location_details" rows="2" placeholder="MDF closet, panel A, shelf 2"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Recovery Playbook</label>
+                    <textarea name="recovery_playbook" rows="3" placeholder="What to check before and after cycling this asset"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Notes</label>
+                    <textarea name="notes" rows="2" placeholder="Known quirks, tenant impact, escalation details"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="is_enabled" checked>
+                        Asset is active
+                    </label>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn close-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="saveAssetBtn">Save Asset</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/inventory.js?v=1"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js');
+      }
+    </script>
+</body>
+</html>
